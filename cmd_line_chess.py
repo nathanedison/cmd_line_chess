@@ -283,6 +283,7 @@ def check(color_code, current_position, king_position):
         for location in current_position[opposite_color(color_code)][piece]:    #locations of all opposing pieces
             if king_position in current_position[opposite_color(color_code)][piece][location]:      #tests if king is attacked by any opposing piece
                 return True
+    return False
 
 # calculates all possible (not legal) pawn moves and captures; calls: opposite_color
 def pawn_moves_func(board, color_code, current_position, move_log):
@@ -367,9 +368,7 @@ def legal_moves_func(board, color_code, current_position, move_log):
                 test_position = copy.deepcopy(current_position)
                 move_piece(test_board, color_code, test_move_dict, test_move_log, test_position)   #makes move on test board
                 king_position = list(test_position[color_code]['K'].keys())[0]
-                if check(color_code, test_position, king_position) == True:        #disallows moves into check
-                    continue
-                else:
+                if check(color_code, test_position, king_position) == False:        #disallows moves into check
                     legal_moves.setdefault(piece_code, {})
                     legal_moves[piece_code].setdefault(location, [])
                     legal_moves[piece_code][location].append(move)
@@ -405,34 +404,34 @@ def specify_piece(piece_code, piece_option):    # asks player to specify piece w
     print('You can make that move with the %s(s) on the following square(s):' % (piece_name,))
     for location in piece_option:
         print(location, '\t', end='')
-    game_proceeds = None
+    game_state = 0
     choice = ''
-    while game_proceeds == None and choice != '<':
+    while game_state == 0 and choice != '<':
         print(f'''
 
 Please type the location of the {piece_name} you would like to use.
 Type < to reenter your move.
 ''')
         choice = input()
-        if choice in piece_option: game_proceeds = True
+        if choice in piece_option: game_state = 1
         elif choice != '<':
             print('That is not a valid choice. Please try again.')
-    return (choice, game_proceeds)
+    return (choice, game_state)
 
 def pawn_promotion():   # asks player to select piece to promote to
     promotion_list = ['Q', 'R', 'B', 'N']
-    game_proceeds = None
+    game_state = 0
     choice = None
-    while game_proceeds == None and choice != '<':
+    while game_state == 0 and choice != '<':
         print('''Enter the letter of the piece you would like to promote to.
 Type ? to see a list of available promotions. Type < to reenter your move.''')
         choice = input()
-        if choice in promotion_list: game_proceeds = True
+        if choice in promotion_list: game_state = 1
         elif choice == '?':
             for option in promotion_list:
                 print('%s = %s' % (option, piece_family_dict[option].name))
         elif choice != '<': print('That is not a valid choice. Please try again.')
-    return(choice, game_proceeds)
+    return(choice, game_state)
 
 def necessary_specifier(piece_option, start_square):    # determines necessary elements in specifier and returns specifier in minimum essential form; favors file over rank
     if len(piece_option) == 1:          # no specifier necessary
@@ -457,10 +456,10 @@ def find_matching_moves(legal_moves, piece_code, color_code, specifier, move_squ
     matching_pieces = legal_moves.get(piece_code, {'empty': ''})    #finds squares with matching piece type; yields dictionary with 'empty: '' as placeholder to type prevent error if no matching pieces
     piece_option = [location for location in matching_pieces if move_square in matching_pieces[location]]        #stores eligible-piece locations[]
     start_square = ''
-    game_proceeds = True    # game play set to proceed unless no move is found
+    game_state = 1    # game play set to proceed unless no move is found
     if len(piece_option) == 0:          # = no eligible piece
         print('That is not a legal move. Please try again.')
-        game_proceeds = None
+        game_state = 0
     elif len(piece_option) == 1 and (specifier == '' or specifier == '-O'):         # only 1 eligible piece
         start_square = piece_option[0]
     elif len(specifier) == 1:      # only one starting coordinate specified     
@@ -472,9 +471,9 @@ def find_matching_moves(legal_moves, piece_code, color_code, specifier, move_squ
         if len(match) == 1: start_square = match[0]
     elif len(specifier) == 2:       # both coordinates specified
         if specifier in piece_option: start_square = specifier
-    if game_proceeds == True:       # if there are eligible pieces
+    if game_state == 1:       # if there are eligible pieces
         if start_square == '':      # piece not yet specified
-            start_square, game_proceeds = specify_piece(piece_code, piece_option)
+            start_square, game_state = specify_piece(piece_code, piece_option)
             specifier = start_square
         if start_square != '':      # must be "if" condition, not "else" because previous conditional may identify start square
             if specifier != '' and specifier != '-O':
@@ -483,8 +482,8 @@ def find_matching_moves(legal_moves, piece_code, color_code, specifier, move_squ
                 if move_square[0] != start_square[0]:   # pawn is capturing
                     specifier = start_square[0]
                 if promotion == None and move_square[-1] == str(color_dict[opposite_color(color_code)]['back_rank']):   #promotion not yet specified
-                    promotion, game_proceeds = pawn_promotion()             
-    return (start_square, specifier, promotion, game_proceeds)
+                    promotion, game_state = pawn_promotion()             
+    return (start_square, specifier, promotion, game_state)
 
 # validates, interprets, identifies, and executes move entered by player; calls: show_legal_moves, find_matching_moves, move_piece
 def execute_move(board, color_code, chosen_move, legal_moves, move_log, redo_move_log, current_position):
@@ -525,22 +524,22 @@ def execute_move(board, color_code, chosen_move, legal_moves, move_log, redo_mov
         piece_square = question.group(1)    # (O|[a-h][1-8])$
     else:       # fails to match any valid format
         print('That is not a valid move. Please try again.')
-        game_proceeds = None
-        return game_proceeds        # restart turn
+        game_state = 0      # restart turn
+        return game_state
     
     if piece_code == '?':           # finds and displays legal moves for specific piece
         show_legal_moves(board, piece_square, legal_moves)
-        game_proceeds = None
+        game_state = 0
     else:       # interpret response as move 
-        start_square, specifier, promotion, game_proceeds = find_matching_moves(legal_moves, piece_code, color_code, specifier, move_square, promotion)
+        start_square, specifier, promotion, game_state = find_matching_moves(legal_moves, piece_code, color_code, specifier, move_square, promotion)
             
-    if game_proceeds == True:       # execute and record move
+    if game_state == 1:       # execute and record move
         move_record = {'piece_code': piece_code, 'specifier': specifier, 'promotion': promotion, 'castling_rook': castling_rook,
                        'start_square': start_square, 'move_square': move_square, 'capture_square_contents': board[move_square],
                        'en_passant_capture': ''}
         move_piece(board, color_code, move_record, move_log, current_position)
         del redo_move_log[:]        # moves cannot be redone once new line has been initiated
-    return game_proceeds            # None = restart turn   True = proceed to next turn
+    return game_state            # 0 = restart turn   1 = proceed to next turn
 
 
 #---------------- auxillary functions
@@ -594,7 +593,9 @@ def display_move_log(move_log):
 def undo_move(board, color_code, move_log, redo_move_log, current_position):
     if move_log[color_code] == []:
         print('There are no moves to undo.')
-        return None
+        game_state = 0
+        return game_state
+    game_state = 1
     move = move_log[color_code].pop()                           # retrieves and deletes record of last move for color designated by function call
     piece_code = move['piece_code']
     restored_pieces = {}
@@ -608,7 +609,7 @@ def undo_move(board, color_code, move_log, redo_move_log, current_position):
         rook_move_file = chr(101 + relative_dir(ord(move['castling_rook']), 101))   # --- 1 file in direction of rook from the e file (101 = ord('e'))
         castled_rook_square = rook_move_file + str(color_dict[color_code]['back_rank'])
         original_rook_square = move['castling_rook'] + str(color_dict[color_code]['back_rank'])
-        board[original_rook_square] = board[castled_rook_square]                    #return rook to pre-castling position
+        board[original_rook_square] = board[castled_rook_square]                    #move rook to pre-castling position
         board[castled_rook_square] = '   '
         restored_pieces[original_rook_square] = {'color_code': color_code, 'piece_code': 'R'}
         withdrawn_pieces[castled_rook_square] = {'color_code': color_code, 'piece_code': 'R'}
@@ -626,10 +627,10 @@ def undo_move(board, color_code, move_log, redo_move_log, current_position):
     update_position(board, color_code, move, restored_pieces, withdrawn_pieces, current_position, restored_position)
     for color in current_position:
         current_position[color] = restored_position[color]
-    return True
+    return game_state
 
 def end_of_game(board, color_code, move_log, redo_move_log, current_position):    # handles end-of-game options; calls: display_move_log, undo_move, opposite_color
-    game_proceeds = False
+    game_state = -1
     option = ''
     while option != 'q':
         print('\nTo undo last move, type <. To display move log, type m. To save game, type s. To finish, type q.')
@@ -637,59 +638,59 @@ def end_of_game(board, color_code, move_log, redo_move_log, current_position):  
         if option == 'm': print(display_move_log(move_log))
         if option == 's': save_game(move_log)
         if option == '<':
-            game_proceeds = undo_move(board, opposite_color(color_code), move_log, redo_move_log, current_position)
+            game_state = undo_move(board, opposite_color(color_code), move_log, redo_move_log, current_position)
             break
-    return game_proceeds
+    return game_state
 
 # executes single-character option requests by player during turn; calls: display_move_log, opposite_color, save_game undo_move, move_piece
 def game_options(board, color_code, chosen_move, move_log, redo_move_log, current_position):
-    game_proceeds = None
+    game_state = 0
     if chosen_move == 'i': print(instructions)
     elif chosen_move == 'q':        # quit game
-        game_proceeds = False
+        game_state = -1
     elif chosen_move == '/':        # resign game
         print(color_dict[color_code]['color'].capitalize() + ' resigns. ' +
               color_dict[opposite_color(color_code)]['color'].capitalize() + ' wins!')
-        game_proceeds = False
+        game_state = -1
     elif chosen_move == '=':        # offer draw
         print(color_dict[color_code]['color'].capitalize() + ' is offering a draw. Would you like to accept? (To accept, enter y. To refuse, enter nothing.)')
         choice = input()
         if choice == 'y':
             print('The players have agreed to a draw.')
-            game_proceeds = False
+            game_state = -1
         else:
             print(color_dict[opposite_color(color_code)]['color'].capitalize() + ' has refused the draw.\n')
     elif chosen_move == 'm': print(display_move_log(move_log))
     elif chosen_move == 's': save_game(move_log)
     elif chosen_move == '<':        # undo last move
-        game_proceeds = undo_move(board, opposite_color(color_code), move_log, redo_move_log, current_position)
+        game_state = undo_move(board, opposite_color(color_code), move_log, redo_move_log, current_position)
     elif chosen_move == '>':        # redo redo last undone move
         if redo_move_log == []:
             print('There are no moves to redo.')
             return None
         move_piece(board, color_code, redo_move_log.pop(), move_log, current_position)
-        game_proceeds = True    
+        game_state = 1    
     else: print('That is not a valid move. Please try again.')  # invalid entry
 
-    if game_proceeds == False:
-        game_proceeds = end_of_game(board, color_code, move_log, redo_move_log, current_position)
-    return game_proceeds
+    if game_state == -1:
+        game_state = end_of_game(board, color_code, move_log, redo_move_log, current_position)
+    return game_state
 
 # checks for conditions of check, checkmate, stalemate, and insufficient material at beginning of turn; calls end_of_game in case of checkmate or draw
 # calls: check, end_of_game
 def mate_check_draw(board, color_code, silent_mode, current_position, legal_moves, move_log, redo_move_log):
-    game_proceeds = None
+    game_state = 0
     king_position = list(current_position[color_code]['K'].keys())[0]
     if check(color_code, current_position, king_position) == True:      # detects check
         if legal_moves == {}:                                           # checkmate
             print('Checkmate! ' + color_dict[opposite_color(color_code)]['color'].capitalize() + ' wins!')
-            game_proceeds = False
+            game_state = -1
         elif silent_mode == False:                                        # simple check
            print('The ' + color_dict[color_code]['color'] + ' king is in check.')
     elif legal_moves == {}:         # stalemate
         print('Stalemate! The game is drawn.')
-        game_proceeds = False
-    if game_proceeds == None:       # no checkmate or stalemate
+        game_state = -1
+    if game_state == 0:       # no checkmate or stalemate
         if len(current_position[color_code]) < 3 and len(current_position[opposite_color(color_code)]) == 1:    # possibility of insufficient material
             sufficient_material = None
             if      (len(current_position[color_code]) == 2 and           # knight/bishop + king vs. lone king = insufficient material
@@ -698,10 +699,10 @@ def mate_check_draw(board, color_code, silent_mode, current_position, legal_move
                 sufficient_material = True
             if sufficient_material != True:
                 print('The game is drawn due to insufficient material.')
-                game_proceeds = False
-    if game_proceeds == False:
-        game_proceeds = end_of_game(board, color_code, move_log, redo_move_log, current_position)
-    return game_proceeds
+                game_state = -1
+    if game_state == -1:
+        game_state = end_of_game(board, color_code, move_log, redo_move_log, current_position)
+    return game_state
 
 
 # -------------------- primary game-play function
@@ -712,24 +713,24 @@ def play_game(file_path, silent_mode):    # calls: arrange_board, display_board,
     move_log = {'*': [], '-': []}       # {'color_code': ['piece_code', 'piece_square', 'move_square', 'captured_piece', 'capture_square']}
     redo_move_log = []
     chosen_move = ''
-    game_proceeds = None                # None = turn not complete, do not proceed; True = finish turn and go to next turn; False = game over
+    game_state = 0                # 0 = turn not complete, do not proceed to next turn; 1 = finish turn and go to next turn; -1 = game over
     if file_path == '': move_seq = []   # no game to restore, continue with normal gameplay
     else:                               # game is being restored
         game_file = open(file_path)
         log_file = [i.split()[1:] for i in list(game_file)] # captures each pair of moves in the log file as a second-dimension list of 2, removing the move number 
         game_file.close()
         move_seq = list(itertools.chain.from_iterable(log_file)) # combines all moves into one continuous sequence
-    while game_proceeds != False:       # loop until game is over
+    while game_state > -1:       # loop until game is over
         if silent_mode == False:    # keep updating display
             display_board(game_board, color_code, move_log)
             if len(move_log['*']) > 0:  # if previous moves exist
                 last_move = display_move_log(move_log).split()[-1]
                 print(last_move, '\n')
         legal_moves = legal_moves_func(game_board, color_code, current_position, move_log)         #legal_moves: {'piece_code': {'location': ['moves', 'for', 'this', 'piece']}
-        game_proceeds = mate_check_draw(game_board, color_code, silent_mode, current_position,
+        game_state = mate_check_draw(game_board, color_code, silent_mode, current_position,
                                         legal_moves, move_log, redo_move_log)
         auto_move_attempt = 0
-        while game_proceeds == None:                                 # begins turn execution5
+        while game_state == 0:                                 # begins turn execution
             if move_seq != []:   # there are moves to restore
                 auto_move_attempt += 1
                 if auto_move_attempt == 1:      # detects unsuccessful auto move attempt in order to stop auto moving
@@ -751,9 +752,9 @@ def play_game(file_path, silent_mode):    # calls: arrange_board, display_board,
                 print("It's " + color_dict[color_code]['color'] + "'s turn to move. Please enter your move. For more instructions type i.")     #initial move instructions in normal play
                 chosen_move = input()
             if len(chosen_move) < 2:
-                game_proceeds = game_options(game_board, color_code, chosen_move, move_log, redo_move_log, current_position)      # option entered instead of move
+                game_state = game_options(game_board, color_code, chosen_move, move_log, redo_move_log, current_position)      # option entered instead of move
             else:
-                game_proceeds = execute_move(game_board, color_code, chosen_move, legal_moves, move_log, redo_move_log, current_position)
+                game_state = execute_move(game_board, color_code, chosen_move, legal_moves, move_log, redo_move_log, current_position)
         color_code = opposite_color(color_code)                     #sets next turn to opposite color
 
 
