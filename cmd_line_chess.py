@@ -57,6 +57,24 @@ def relative_dir(a, b):             #relative direction of a from b: 1, -1, or 0
         direction = 0
     return direction
 
+def iter_tree(target, index_filters: dict = {}, dim_limit: int = 0, parent_keys: list = []):
+    if type(target) == dict:
+        branch_indexes = target.keys()
+    elif type(target) in (list,tuple,range):
+        branch_indexes = range(len(target))
+    else:
+        branch_indexes = None
+    dimension = len(parent_keys) + 1
+    if branch_indexes == None or dimension > dim_limit > 0:
+        yield (parent_keys, target)
+    else:
+        if str(dimension) in index_filters.keys():
+            branch_filter = index_filters[str(dimension)]
+            if callable(branch_filter):
+                branch_indexes = filter(branch_filter,branch_indexes)
+        for branch in branch_indexes:
+            yield from iter_tree(target[branch], index_filters, dim_limit, parent_keys + [branch])
+
 # assembles, aligns, and displays board and marks previous move; calls: opposite_color
 def display_board(board, color_code, move_log):   #displays command-prompt board
     if len(move_log[opposite_color(color_code)]) > 0:                               # locate starting and ending squares of previous move in order to mark them
@@ -194,9 +212,9 @@ def arrange_board():
     piece_positions = {}
     starting_pieces = ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
     for color_code in color_dict:                                         #arranges pieces and pawn in starting position
-        for i in range(97, 105):                                    #97-104 = chr values of column letters
-            piece_code = starting_pieces[i - 97]
-            piece_square = chr(i) + str(color_dict[color_code]['back_rank'])      #column_letter + back_rank
+        for col_num in range(97, 105):                                    #97-104 = chr values of column letters
+            piece_code = starting_pieces[col_num - 97]
+            piece_square = chr(col_num) + str(color_dict[color_code]['back_rank'])      #column_letter + back_rank
             pawn_square = piece_square[0] + str(color_dict[color_code]['back_rank'] + color_dict[color_code]['direction'])  #column_letter + back_rank+1
             board[piece_square] = color_code + piece_code + color_code     #color_code + <piece_code from list (corresponding to columns)> + color_code
             board[pawn_square] = color_code + 'i' + color_code
@@ -211,33 +229,31 @@ def update_position(board, color_code, move_record, moved_pieces, deleted_pieces
     delete_pieces(deleted_pieces, new_position)
     discovery = {}
     obstruction = {}
-    for color in new_position:
-        for piece in set(new_position[color]).intersection({'Q', 'R', 'B'}):
-            for location in new_position[color][piece]:
-                
-                for change, effect in [(deleted_pieces, discovery), (moved_pieces, obstruction)]:
-                    for square in change:
-                        if square in new_position[color][piece][location] and location != move_record['move_square']:
-                            effect.setdefault(square, [])
-                            effect[square].append(location)
-    for color in new_position:
-        for piece in set(new_position[color]).intersection({'Q', 'R', 'B'}):
-            for location in new_position[color][piece]:
-                
-                for effect, square_control in [(discovery, True), (obstruction, False)]:
-                    for square in effect:
-                        if location in effect[square]:
-                            current_scope = new_position[color][piece][location]
-                            altered_squares = []
-                            column = ord(square[0]) - 96
-                            row = int(square[1])
-                            h = relative_dir(ord(square[0]), ord(location[0]))
-                            v = relative_dir(int(square[1]), int(location[1]))
-                            evaluate_squares(h, v, column, row, piece, 'long_reach', board, altered_squares)
-                            if square_control == True:
-                                new_position[color][piece][location] = list(set(current_scope) | set(altered_squares))
-                            else:
-                                new_position[color][piece][location] = list(set(current_scope) - set(altered_squares))
+    long_range_pieces = ('Q','R','B')
+    for path in iter_tree(new_position,{'2':lambda x: x in long_range_pieces},3):
+        color, piece, location = path[0][:3]      
+        for change, effect in [(deleted_pieces, discovery), (moved_pieces, obstruction)]:
+            for square in change:
+                if square in new_position[color][piece][location] and location != move_record['move_square']:
+                    effect.setdefault(square, [])
+                    effect[square].append(location)
+
+    for path in iter_tree(new_position,{'2':lambda x: x in long_range_pieces},3):
+        color, piece, location = path[0][:3]             
+        for effect, square_control in [(discovery, True), (obstruction, False)]:
+            for square in effect:
+                if location in effect[square]:
+                    current_scope = new_position[color][piece][location]
+                    altered_squares = []
+                    column = ord(square[0]) - 96
+                    row = int(square[1])
+                    h = relative_dir(ord(square[0]), ord(location[0]))
+                    v = relative_dir(int(square[1]), int(location[1]))
+                    evaluate_squares(h, v, column, row, piece, 'long_reach', board, altered_squares)
+                    if square_control == True:
+                        new_position[color][piece][location] = list(set(current_scope) | set(altered_squares))
+                    else:
+                        new_position[color][piece][location] = list(set(current_scope) - set(altered_squares))
 
 # moves piece on board and adds move record to move_log
 def move_piece(board, color_code, move_record, move_log, current_position):
@@ -279,10 +295,9 @@ def move_piece(board, color_code, move_record, move_log, current_position):
 
 # checks if king is currently in check; calls: opposite_color
 def check(color_code, current_position, king_position):
-    for piece in current_position[opposite_color(color_code)]:                  
-        for location in current_position[opposite_color(color_code)][piece]:    #locations of all opposing pieces
-            if king_position in current_position[opposite_color(color_code)][piece][location]:      #tests if king is attacked by any opposing piece
-                return True
+    for location in iter_tree(current_position[opposite_color(color_code)],dim_limit=2):  #locations of all opposing pieces
+        if king_position in location[1]:    #tests if king is attacked by any opposing piece
+            return True
     return False
 
 # calculates all possible (not legal) pawn moves and captures; calls: opposite_color
@@ -341,14 +356,17 @@ def castling_privileges(board, color_code, current_position, move_log):     # de
 # calculates all legal moves for current player and returns results in dictionary; calls: pawn_possible_moves, castling_privileges, move_piece, check
 def legal_moves_func(board, color_code, current_position, move_log):
     possible_moves = {}
-    for piece_code in current_position[color_code]:
-        if piece_code != 'i':                           #find moves for all pieces except pawns
-            for location in current_position[color_code][piece_code]:
-                for controlled_square in current_position[color_code][piece_code][location]:
-                    if board[controlled_square][0] != color_code:
-                        possible_moves.setdefault(piece_code, {})
-                        possible_moves[piece_code].setdefault(location, [])
-                        possible_moves[piece_code][location].append(controlled_square)
+    for indexes, controlled_square in iter_tree(current_position[color_code],{'1':lambda x: x != 'i'}):
+        piece_code, location = indexes[:-1]
+
+ #   for piece_code in current_position[color_code]:
+ #       if piece_code != 'i':                           #find moves for all pieces except pawns
+ #           for location in current_position[color_code][piece_code]:
+ #               for controlled_square in current_position[color_code][piece_code][location]:
+        if board[controlled_square][0] != color_code:
+            possible_moves.setdefault(piece_code, {})
+            possible_moves[piece_code].setdefault(location, [])
+            possible_moves[piece_code][location].append(controlled_square)
 
     if 'i' in current_position[color_code]:         #find pawn moves
         pawn_moves = {}
@@ -357,25 +375,27 @@ def legal_moves_func(board, color_code, current_position, move_log):
             possible_moves.setdefault('i', {})
             possible_moves['i'][pawn] = pawn_moves[pawn]
     legal_moves = {}            #legal_moves = {'piece_code': {'location': ['moves', 'for', 'this', 'piece']}}
-    for piece_code in possible_moves:
-        for location in possible_moves[piece_code]:
-            for move in possible_moves[piece_code][location]:
-                test_move_dict = {'piece_code': piece_code, 'specifier': '', 'promotion': None,
-                                  'start_square': location, 'move_square': move, 'capture_square_contents': '   ',
-                                  'en_passant_capture': ''}
-                test_board = copy.deepcopy(board)
-                test_move_log = copy.deepcopy(move_log)
-                test_position = copy.deepcopy(current_position)
-                move_piece(test_board, color_code, test_move_dict, test_move_log, test_position)   #makes move on test board
-                king_position = list(test_position[color_code]['K'].keys())[0]
-                if check(color_code, test_position, king_position) == False:        #disallows moves into check
-                    legal_moves.setdefault(piece_code, {})
-                    legal_moves[piece_code].setdefault(location, [])
-                    legal_moves[piece_code][location].append(move)
+
+    for indexes, move in iter_tree(possible_moves):
+        piece_code, location = indexes[:-1]
+    #for piece_code in possible_moves:
+    #    for location in possible_moves[piece_code]:
+    #        for move in possible_moves[piece_code][location]:
+        test_move_dict = {'piece_code': piece_code, 'specifier': '', 'promotion': None,
+                            'start_square': location, 'move_square': move, 'capture_square_contents': '   ',
+                            'en_passant_capture': ''}
+        test_board = copy.deepcopy(board)
+        test_move_log = copy.deepcopy(move_log)
+        test_position = copy.deepcopy(current_position)
+        move_piece(test_board, color_code, test_move_dict, test_move_log, test_position)   #makes move on test board
+        king_position = list(test_position[color_code]['K'].keys())[0]
+        if check(color_code, test_position, king_position) == False:        #disallows moves into check
+            legal_moves.setdefault(piece_code, {})
+            legal_moves[piece_code].setdefault(location, [])
+            legal_moves[piece_code][location].append(move)
     castling_moves = castling_privileges(board, color_code, current_position, move_log)
     if castling_moves != {}: legal_moves['O'] = castling_moves      # adds available castling moves
     return legal_moves
-
 
 # --------------------------- move execution functions
 
